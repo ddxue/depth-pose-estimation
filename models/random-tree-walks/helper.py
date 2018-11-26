@@ -38,7 +38,7 @@ jointNameEVAL = ['NECK', 'HEAD', 'LEFT SHOULDER', 'LEFT ELBOW', \
 jointNameITOP = ['HEAD', 'NECK', 'LEFT_SHOULDER', 'RIGHT_SHOULDER', \
                 'LEFT_ELBOW', 'RIGHT_ELBOW', 'LEFT_HAND', 'RIGHT_HAND', \
                 'TORSO', 'LEFT_HIP', 'RIGHT_HIP', 'LEFT_KNEE', \
-                'RIGHT_KNEE', 'LEFdrawPredT_FOOT', 'RIGHT_FOOT']
+                'RIGHT_KNEE', 'LEFT_FOOT', 'RIGHT_FOOT']
 
 trainTestITOP = [1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0] # train = 0, test = 1
 kinemOrderEVAL =   [0, 1, 2, 5, 3, 6, 4, 7, 8, 10, 9, 11]
@@ -173,8 +173,6 @@ def drawPred(img, joints, paths, center, filename, nJoints, jointName):
 
     if paths is not None:
         paths_copy = paths.copy()
-        # if isTop:
-        #     paths_copy = paths_copy[:8]
         for i, path in enumerate(paths_copy):
             nPts = path.shape[0]
             for j, pt in enumerate(path):
@@ -183,8 +181,6 @@ def drawPred(img, joints, paths, center, filename, nJoints, jointName):
 
     if joints is not None:
         joints_copy = joints.copy()
-        # if isTop:
-        #     joints_copy = joints_copy[:8]
         for i, joint in enumerate(joints_copy):
             cv2.circle(img, tuple(joint[:2].astype(np.uint16)), 4, palette[i], -1)
 

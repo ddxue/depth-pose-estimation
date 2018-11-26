@@ -143,22 +143,21 @@ def process_cad60_imgs(folder_name, skeletons):
                 rgb_path = os.path.join(dirName, fname)
 
                 depth_im = imageio.imread(depth_path) # H x W = depth_z
+                depth_im = depth_im / 1000.0 # convert from mm to meters
+                depth_images.append(depth_im) # H x W = depth_z
 
                 skeleton_frames = skeletons[video_id]
                 joint_coords = skeleton_frames[frame_num] # = world_x, world_y, depth_z
 
-                # Check non-zero depth values
+                # Check non-zero z-depth values
                 if np.count_nonzero(joint_coords[:,2] == 0) > 0:
                     print(joint_coords[:,2])
                     continue
 
                 # Convert to pixel (im_y, im_x, depth_z) coordinates
                 joint_coords = world2pixel(joint_coords, C) # im_y, im_x, depth_z
-
-                # Add to array
-                depth_images.append(depth_im) # H x W = depth_z
+                joint_coords[:,2] = joint_coords[:,2] / 1000.0 # convert from mm to meters
                 joints.append(joint_coords)
-
 
             # [n x height (240) width (320)]
             # [n x joints (15) x 3]

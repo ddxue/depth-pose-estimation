@@ -58,10 +58,10 @@ parser.add_argument('--dataset', type=str, default='CAD-60',
 # Location of saved data directories
 parser.add_argument('--model-dir', type=str, default='../../output/random-tree-walks/models',
                     help='Directory of the saved model')
-parser.add_argument('--png-dir', type=str, default='../../output/random-tree-walks/png',
-                    help='Directory to save prediction images')
 parser.add_argument('--preds-dir', type=str, default='../../output/random-tree-walks/preds',
                     help='Directory to save predictions')
+parser.add_argument('--png-dir', type=str, default='../../output/random-tree-walks/png',
+                    help='Directory to save prediction images')
 
 # Training options
 parser.add_argument('--seed', type=int, default=1111,
@@ -88,7 +88,7 @@ args = parser.parse_args()
 ###############################################################################
 
 # Train-test ratio
-TRAIN_RATIO = 0.04
+TRAIN_RATIO = 0.8
 
 # Dimension of each feature vector
 NUM_FEATS = 500
@@ -100,6 +100,9 @@ NUM_SAMPLES = 500
 # Set maximum XYZ offset from each joint
 MAX_XY_OFFSET = 60 # image xy coordinates
 MAX_Z_OFFSET = 2 # z depth coordinates
+
+# Number of clusters for K-Means regression
+K = 20
 
 ###############################################################################
 # Constants
@@ -137,6 +140,8 @@ def load_dataset(processed_dir, is_mask=False):
     Note that each joint is a coordinate of the form (im_x, im_y, depth_z).
     Each depth image is an H x W image containing depth_z values.
 
+    depth_z values are in meters.
+
     @return:
         depth_images : depth images (N x H x W)
         joints : joint positions (N x NUM_JOINTS x 3)
@@ -155,7 +160,7 @@ def load_dataset(processed_dir, is_mask=False):
         depth_images = depth_images * depth_mask
 
     logger.debug('Data loaded: # data: %d', depth_images.shape[0])
-    return depth_images, joints
+    return depth_images[:4000], joints[:4000]
 
 def compute_params(joints, num_feats=NUM_FEATS, max_feat_offset=MAX_FEAT_OFFSET):
     """Computes the body centers for each skeleton.
@@ -289,7 +294,7 @@ def get_training_samples(joint_id, X, y, body_centers, theta, num_feats=NUM_FEAT
 
     return S_f, S_u
 
-def stochastic(regressor, features, unit_directions, K=20):
+def stochastic(regressor, features, unit_directions):
     """Applies stochastic relaxation when choosing the unit direction. Training
     samples at the leaf nodes are further clustered using K-means.
     """
@@ -312,7 +317,7 @@ def stochastic(regressor, features, unit_directions, K=20):
         L[leaf_id] = (weights, centers)
     return L
 
-def train(joint_id, X, y, model_dir, min_samples_leaf=400):
+def train(joint_id, X, y, model_dir, min_samples_leaf=400, load_models=False):
     """Trains a regressor tree on the unit directions towards the joint.
 
     @params:
@@ -320,17 +325,20 @@ def train(joint_id, X, y, model_dir, min_samples_leaf=400):
         X : samples feature array (N x num_samples x num_feats)
         y : samples unit direction vectors (N x num_samples x 3)
         min_samples_split : minimum number of samples required to split an internal node
+        load_models : load trained models from disk (if exist)
     """
     logger.debug('Start training %s model...', JOINT_NAMES[joint_id])
 
     regressor_path = os.path.join(model_dir, 'regressor' + str(joint_id) + '.pkl')
     L_path = os.path.join(model_dir, 'L' + str(joint_id) + '.pkl')
 
-    # if loadModels and os.path.isfile(regressor_path) and os.path.isfile(L_path):
-    #     logger.debug('Loading model %s from files...', JOINT_NAMES[jointID])
-    #     regressor = pickle.load(open(regressor_path, 'rb'))
-    #     L = pickle.load(open(L_path, 'rb'))
-    # else:
+    # Load saved model from disk
+    if load_models and (os.path.isfile(regressor_path) and os.path.isfile(L_path)):
+        logger.debug('Loading model %s from files...', JOINT_NAMES[joint_id])
+
+        regressor = pickle.load(open(regressor_path, 'rb'))
+        L = pickle.load(open(L_path, 'rb'))
+        return regressor, L
 
     X_reshape = X.reshape(X.shape[0] * X.shape[1], X.shape[2]) # (N x num_samples, num_feats)
     y_reshape = y.reshape(y.shape[0] * y.shape[1], y.shape[2]) # (N x num_samples, 3)
@@ -343,6 +351,9 @@ def train(joint_id, X, y, model_dir, min_samples_leaf=400):
     regressor = DecisionTreeRegressor(min_samples_leaf=min_samples_leaf)
     regressor.fit(X_reshape[valid_rows], y_reshape[valid_rows])
 
+    L = stochastic(regressor, X_reshape, y_reshape)
+
+    # Print statistics on leafs
     leaf_ids = regressor.apply(X_reshape)
     bin = np.bincount(leaf_ids)
     unique_ids = np.unique(leaf_ids)
@@ -354,11 +365,9 @@ def train(joint_id, X, y, model_dir, min_samples_leaf=400):
     logger.debug('Model %s - Biggest Leaf ID: %d, # Samples: %d/%d', JOINT_NAMES[joint_id], biggest, bin[biggest], np.sum(bin))
     logger.debug('Model %s - Average Leaf Size: %d', JOINT_NAMES[joint_id], np.sum(bin) / unique_ids.shape[0])
 
-    L = stochastic(regressor, X_reshape, y_reshape)
-
     # Save models to disk
-    # pickle.dump(regressor, open(regressor_path, 'wb'))
-    # pickle.dump(L, open(L_path, 'wb'))
+    pickle.dump(regressor, open(regressor_path, 'wb'))
+    pickle.dump(L, open(L_path, 'wb'))
 
     return regressor, L
 
@@ -396,8 +405,8 @@ else:
     regressors_tmp = [regressor_queue.get() for p in processes]
     Ls_tmp = [L_queue.get() for p in processes]
 
-    regressors = dict(i.items()[0] for i in regressors_tmp)
-    Ls = dict(i.items()[0] for i in Ls_tmp)
+    regressors = dict(list(i.items())[0] for i in regressors_tmp)
+    Ls = dict(list(i.items())[0] for i in Ls_tmp)
 
     [p.join() for p in processes]
 
@@ -442,7 +451,7 @@ for kinem_idx, joint_id in enumerate(kinem_order):
     logger.debug('Testing %s model', JOINT_NAMES[joint_id])
     for test_idx in range(num_test):
         qm0 = body_centers_test[test_idx] if kinem_parent[kinem_idx] == -1 else y_pred[test_idx][kinem_parent[kinem_idx]]
-        qms[test_idx][joint_id], y_pred[test_idx][joint_id] = test_model(regressors[joint_id], Ls[joint_id], theta, qm0, I_test[test_idx], body_centers_test[test_idx])
+        qms[test_idx][joint_id], y_pred[test_idx][joint_id] = test_model(regressors[joint_id], Ls[joint_id], theta, qm0, X_test[test_idx], body_centers_test[test_idx])
         local_error[test_idx, :, joint_id, :] = y_test[test_idx, joint_id] - qms[test_idx][joint_id]
 
 y_pred[:, :, 2] = y_test[:, :, 2]
@@ -451,49 +460,51 @@ y_pred[:, :, 2] = y_test[:, :, 2]
 # np.save(modelsDir + 'y_pred.npy', y_pred)
 # np.save(modelsDir + 'local_error.npy', local_error)
 #
-# mkdir(outDir + modelsDir + '/pred/')
-# for jointID in range(NUM_JOINTS):
-#     # print(y_test[:, jointID].shape)
-#     np.savetxt(outDir+modelsDir+'/pred/'+JOINT_NAMES[jointID]+'_test.txt', y_test[:, jointID], fmt='%.3f')
+# for joint_id in range(NUM_JOINTS):
+#     # print(y_test[:, joint_id].shape)
+#     np.savetxt(outDir+modelsDir+'/pred/'+JOINT_NAMES[joint_id]+'_test.txt', y_test[:, joint_id], fmt='%.3f')
 #     # print(y_pred[:, jointID].shape)
-#     np.savetxt(outDir+modelsDir+'/pred/'+JOINT_NAMES[jointID]+'_pred.txt', y_pred[:, jointID], fmt='%.3f ')
+#     np.savetxt(outDir+modelsDir+'/pred/'+JOINT_NAMES[joint_id]+'_pred.txt', y_pred[:, joint_id], fmt='%.3f ')
 
 ###############################################################################
 # Run evaluation metrics
 ###############################################################################
 
-def get_dists(y_test, y_pred):
+logger.debug('\n------- Computing evaluation metrics -------')
+
+def get_distances(y_test, y_pred):
     """Compute the raw world distances between the prediction and actual joint
     locations.
     """
     assert y_test.shape == y_pred.shape, "Mismatch of y_test and y_pred"
 
-    dists = np.zeros((y_test.shape[:2]))
+    distances = np.zeros((y_test.shape[:2]))
     for i in range(y_test.shape[0]):
         p1 = pixel2world(y_test[i], C)
         p2 = pixel2world(y_pred[i], C)
-        dists[i] = np.sqrt(np.sum((p1-p2)**2, axis=1))
-    return dists
+        distances[i] = np.sqrt(np.sum((p1-p2)**2, axis=1))
+    return distances
 
-dists = get_dists(y_test, y_pred) * 100.0
+distances = get_distances(y_test, y_pred) * 100.0 # convert from m to cm
 
-# np.savetxt(outDir+modelsDir+'/pred/dists.txt', dists, fmt='%.3f')
+distances_path = os.path.join(args.preds_dir, 'distances.txt')
+np.savetxt(distances_path, distances, fmt='%.3f')
 
-# dists_pixel = np.zeros((y_test.shape[:2]))
-# for i in range(y_test.shape[0]):
-#    p1 = y_test[i]
-#    p2 = y_pred[i]
-#    dists_pixel[i] = np.sqrt(np.sum((p1-p2)**2, axis=1))
+distances_pixel = np.zeros((y_test.shape[:2]))
+for i in range(y_test.shape[0]):
+   p1 = y_test[i]
+   p2 = y_pred[i]
+   distances_pixel[i] = np.sqrt(np.sum((p1-p2)**2, axis=1))
 
 mAP = 0
 for i in range(NUM_JOINTS):
     logger.debug('\nJoint %s:', JOINT_NAMES[i])
-    logger.debug('Average distance: %f cm', np.mean(dists[:, i]))
-    #logger.debug('Average pixel distance: %f', np.mean(dists_pixel[:, i]))
-    logger.debug('5cm accuracy: %f', np.sum(dists[:, i] < 5) / float(dists.shape[0]))
-    logger.debug('10cm accuracy: %f', np.sum(dists[:, i] < 10) / float(dists.shape[0]))
-    logger.debug('15cm accuracy: %f', np.sum(dists[:, i] < 15) / float(dists.shape[0]))
-    mAP += np.sum(dists[:, i] < 10) / float(dists.shape[0])
+    logger.debug('Average distance: %f cm', np.mean(distances[:, i]))
+    logger.debug('Average pixel distance: %f', np.mean(distances_pixel[:, i]))
+    logger.debug('5cm accuracy: %f', np.sum(distances[:, i] < 5) / float(distances.shape[0]))
+    logger.debug('10cm accuracy: %f', np.sum(distances[:, i] < 10) / float(distances.shape[0]))
+    logger.debug('15cm accuracy: %f', np.sum(distances[:, i] < 15) / float(distances.shape[0]))
+    mAP += np.sum(distances[:, i] < 10) / float(distances.shape[0])
 logger.debug('mAP (10cm): %f', mAP / NUM_JOINTS)
 
 ###############################################################################
@@ -501,6 +512,8 @@ logger.debug('mAP (10cm): %f', mAP / NUM_JOINTS)
 ###############################################################################
 
 if args.make_png:
+    logger.debug('\n------- Saving prediction visualizations -------')
+
     for test_idx in range(num_test):
-        png_path = os.path.join(args.png_dir, str(test_idx)+'.png')
+        png_path = os.path.join(args.png_dir, str(test_idx) + '.png')
         drawPred(X_test[test_idx], y_pred[test_idx], qms[test_idx], body_centers_test[test_idx], png_path, NUM_JOINTS, JOINT_NAMES)
