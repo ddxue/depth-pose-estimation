@@ -14,6 +14,7 @@ from skimage.transform import rescale, resize, downscale_local_mean
 import imageio
 import matplotlib.pyplot as plt
 
+# Depth image dimension
 kResX = 320
 kResY = 240
 
@@ -43,6 +44,22 @@ def pixel_from_coords(self, x, y, z):
     yPixel = (kResY / 2) - (fCoeffY * float(y) / float(z))
 
     return int(xPixel), int(yPixel)
+
+C = 3.8605e-3 #NUI_CAMERA_DEPTH_NOMINAL_INVERSE_FOCAL_LENGTH_IN_PIXELS
+
+def pixel2world(pixel, C):
+    world = np.empty(pixel.shape)
+    world[:, 0] = (pixel[:, 0] - kResX / 2.0) * C * pixel[:, 2]
+    world[:, 1] = -(pixel[:, 1] - kResY /2.0) * C * pixel[:, 2]
+    world[:, 2] = pixel[:, 2]
+    return world
+
+def world2pixel(world, C):
+    pixel = np.empty(world.shape)
+    pixel[:, 0] = np.rint(world[:, 0] / world[:, 2] / C + kResX / 2.0)
+    pixel[:, 1] = np.rint(-world[:, 1] / world[:, 2] / C + kResY / 2.0)
+    pixel[:, 2] = world[:, 2]
+    return pixel
 
 def read_cad60_skels(folder_name='.'):
     result = {}
@@ -105,6 +122,7 @@ def parse_skeleton_text(line):
         skeleton_coords[2],
     ]
 
+    skeleton_coords = np.array(skeleton_coords)
     return frame_num, skeleton_coords # ",".join((str(v) for v in output))
 
 def process_cad60_imgs(folder_name, skeletons):
@@ -118,38 +136,40 @@ def process_cad60_imgs(folder_name, skeletons):
                 video_id = os.path.basename(os.path.normpath(dirName))
                 frame_num = int(os.path.splitext(fname)[0].split('_')[1]) - 1
 
+                # print("Video ID: ", video_id)
+                # print("Frame #: ", frame_num)
+
                 depth_path = os.path.join(dirName, fname)
                 rgb_path = os.path.join(dirName, fname)
 
-                depth_im = imageio.imread(depth_path)
-                depth_images.append(depth_im)
+                depth_im = imageio.imread(depth_path) # H x W = depth_z
 
                 skeleton_frames = skeletons[video_id]
-                skeleton_coords = skeleton_frames[frame_num]
-                joints.append(skeleton_coords)
+                joint_coords = skeleton_frames[frame_num] # = world_x, world_y, depth_z
 
-                # print("Video ID: ", video_id)
-                # print("Frame #: ", frame_num)
-                # print("Shape: ", depth_im.shape)
-                # print("x: ", x)
-                # print("y: ", y)
+                # Check non-zero depth values
+                if np.count_nonzero(joint_coords[:,2] == 0) > 0:
+                    print(joint_coords[:,2])
+                    continue
 
-                # plt.scatter(x, y, c='r')
-                # plt.imshow(depth_im, cmap='gray')
-                # return
+                # Convert to pixel (im_y, im_x, depth_z) coordinates
+                joint_coords = world2pixel(joint_coords, C) # im_y, im_x, depth_z
 
-                # with open(os.path.join(dirName, fname)) as f:
+                # Add to array
+                depth_images.append(depth_im) # H x W = depth_z
+                joints.append(joint_coords)
+
 
             # [n x height (240) width (320)]
             # [n x joints (15) x 3]
 
+    depth_images, joints = np.array(depth_images), np.array(joints)
     return depth_images, joints
 
 dir_ = 'datasets/CAD-60/'
 
 skeletons = read_cad60_skels(dir_)
 depth_images, joints = process_cad60_imgs(dir_, skeletons)
-depth_images, joints = np.array(depth_images), np.array(joints)
 print(depth_images.shape)
 print(joints.shape)
 
