@@ -16,9 +16,9 @@ Directory Structure:
 
 depth-pose-estimation/
     data/
-        process_depth_images.py
-        ...
         datasets/
+            CAD-60/
+            ...
         processed/
             CAD-60/
                 depth_images.npy
@@ -71,8 +71,8 @@ parser.add_argument('--shuffle', type=int, default=1,
                     help='Shuffle the data')
 parser.add_argument('--multithread', action='store_true',
                     help='Train each joint on a separate threads')
-parser.add_argument('--num-threads', type=int, default=3,
-                    help='Number of threads to use to concurrently process joints.')
+# parser.add_argument('--num-threads', type=int, default=3,
+#                     help='Number of threads to use to concurrently process joints.')
 
 # Evaluation hyperparameters
 parser.add_argument('--num-steps', type=int, default=300,
@@ -91,15 +91,15 @@ args = parser.parse_args()
 ###############################################################################
 
 # Train-test ratio
-TRAIN_RATIO = 0.8
-SMALL_DATA_SIZE = 500
+TRAIN_RATIO = 0.7
+SMALL_DATA_SIZE = 40000
 
 # Dimension of each feature vector
 NUM_FEATS = 500
 MAX_FEAT_OFFSET = 150
 
 # Number of samples for each joint for each example
-NUM_SAMPLES = 500
+NUM_SAMPLES = 200
 
 # Set maximum XYZ offset from each joint
 MAX_XY_OFFSET = 10 # image xy coordinates (pixels)
@@ -176,7 +176,7 @@ def load_dataset(processed_dir, is_mask=False, small_data=True):
     depth_images = np.load(os.path.join(processed_dir, 'depth_images.npy')) # N x H x W depth images
     joints = np.load(os.path.join(processed_dir, 'joints.npy')) # N x NUM_JOINTS x 3 joint locations
 
-    assert depth_images.shape[1] == H and depth_images.shape[2] == W, "Invalid depth image dimensions."
+    assert depth_images.shape[1] == H and depth_images.shape[2] == W, "Invalid dimensions for depth image"
 
     # Load and apply mask to the depth images
     if is_mask:
