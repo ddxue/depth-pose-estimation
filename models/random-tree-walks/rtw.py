@@ -7,6 +7,7 @@ import pickle
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.cluster import MiniBatchKMeans
 from multiprocessing import Process, Queue
+from multiprocessing.pool import ThreadPool
 
 from helper import *
 
@@ -70,6 +71,8 @@ parser.add_argument('--shuffle', type=int, default=1,
                     help='Shuffle the data')
 parser.add_argument('--multithread', action='store_true',
                     help='Train each joint on a separate threads')
+parser.add_argument('--num-threads', type=int, default=3,
+                    help='Number of threads to use to concurrently process joints.')
 
 # Evaluation hyperparameters
 parser.add_argument('--num-steps', type=int, default=300,
@@ -89,6 +92,7 @@ args = parser.parse_args()
 
 # Train-test ratio
 TRAIN_RATIO = 0.8
+SMALL_DATA_SIZE = 500
 
 # Dimension of each feature vector
 NUM_FEATS = 500
@@ -121,6 +125,25 @@ JOINT_NAMES = ['NECK (0)', 'HEAD (1)', \
                 'RIGHT HIP (13)', \
                 'TORSO (14)']
 
+# Map from joint names to index
+JOINT_IDX = {
+    'NECK': 0,
+    'HEAD': 1,
+    'LEFT SHOULDER': 2,
+    'LEFT ELBOW': 3,
+    'LEFT HAND': 4,
+    'RIGHT SHOULDER': 5,
+    'RIGHT ELBOW': 6,
+    'RIGHT HAND': 7,
+    'LEFT KNEE': 8,
+    'LEFT FOOT': 9,
+    'RIGHT KNEE': 10,
+    'RIGHT FOOT': 11,
+    'LEFT HIP': 12,
+    'RIGHT HIP': 13,
+    'TORSO': 14,
+}
+
 # Depth image dimension
 H, W = 240, 320
 
@@ -135,7 +158,7 @@ kinem_parent = [-1, 14, 14, 14, 0, 0, 0, 2, 5, 3, 6, 12, 13, 8, 10]
 # Load dataset splits
 ###############################################################################
 
-def load_dataset(processed_dir, is_mask=False):
+def load_dataset(processed_dir, is_mask=False, small_data=True):
     """Loads the depth images and joints from the processed dataset.
 
     Note that each joint is a coordinate of the form (im_x, im_y, depth_z).
@@ -160,29 +183,15 @@ def load_dataset(processed_dir, is_mask=False):
         depth_mask = np.load(os.path.join(processed_dir, 'depth_mask.npy')) # N x H x W depth mask
         depth_images = depth_images * depth_mask
 
+    # Run experiments on random subset of data
+    if small_data:
+        random_idx = np.random.choice(depth_images.shape[0], SMALL_DATA_SIZE, replace=False)
+        depth_images, joints = depth_images[random_idx], joints[random_idx]
+
     logger.debug('Data loaded: # data: %d', depth_images.shape[0])
-    return depth_images[:2000], joints[:2000]
+    return depth_images, joints
 
-def compute_params(joints, num_feats=NUM_FEATS, max_feat_offset=MAX_FEAT_OFFSET):
-    """Computes the body centers for each skeleton.
-
-    @params:
-        max_feat_offset : the maximum offset for features (before divided by d)
-        num_feats : the number of features of each offset point
-    """
-    logger.debug('Computing parameters...')
-
-    # Calculate the body centers by weighted average of joints
-    left_hips = (joints[:,2] + 2 * joints[:,8]) / 3.0
-    right_hips = (joints[:,5] + 2 * joints[:,10]) / 3.0
-    body_centers = (joints[:,2] + left_hips + joints[:,5] + right_hips) / 4.0
-
-    # Compute the theta = (-max_feat_offset, max_feat_offset) for 4 coordinates (x1, x2, y1, y2)
-    theta = np.random.randint(-max_feat_offset, max_feat_offset + 1, (4, num_feats)) # (4, num_feats)
-
-    return body_centers, theta
-
-def split_dataset(X, y, body_centers, train_ratio):
+def split_dataset(X, y, train_ratio):
     """Splits the dataset according to the train-test ratio.
 
     @params:
@@ -195,23 +204,36 @@ def split_dataset(X, y, body_centers, train_ratio):
 
     X_train, y_train = X[num_test:], y[num_test:]
     X_test, y_test = X[:num_test], y[:num_test]
-    body_centers_train, body_centers_test = body_centers[num_test:], body_centers[:num_test]
 
     logger.debug('Data split: # training data: %d, # test data: %d', X_train.shape[0], X_test.shape[0])
-    return X_train, y_train, X_test, y_test, body_centers_train, body_centers_test
+    return X_train, y_train, X_test, y_test
 
 processed_dir = os.path.join(args.input_dir, args.dataset) # directory of saved numpy files
 
 depth_images, joints = load_dataset(processed_dir)
-body_centers, theta = compute_params(joints)
-X_train, y_train, X_test, y_test, body_centers_train, body_centers_test = split_dataset(depth_images, joints, body_centers, TRAIN_RATIO)
+X_train, y_train, X_test, y_test = split_dataset(depth_images, joints, TRAIN_RATIO)
 
 num_train = X_train.shape[0]
 num_test = X_test.shape[0]
 
+
 ###############################################################################
 # Train model
 ###############################################################################
+
+def compute_theta(num_feats=NUM_FEATS, max_feat_offset=MAX_FEAT_OFFSET):
+    """Computes the theta for each skeleton.
+
+    @params:
+        max_feat_offset : the maximum offset for features (before divided by d)
+        num_feats : the number of features of each offset point
+    """
+    logger.debug('Computing theta...')
+
+    # Compute the theta = (-max_feat_offset, max_feat_offset) for 4 coordinates (x1, x2, y1, y2)
+    theta = np.random.randint(-max_feat_offset, max_feat_offset + 1, (4, num_feats)) # (4, num_feats)
+
+    return theta
 
 def get_features(img, q, z, theta):
     """Gets the feature vector for a single example.
@@ -253,7 +275,7 @@ def get_random_offset(max_offset_xy=MAX_XY_OFFSET, max_offset_z=MAX_Z_OFFSET):
     offset = np.concatenate((offset_xy, offset_z)) # xyz offset
     return offset
 
-def get_training_samples(joint_id, X, y, body_centers, theta, num_feats=NUM_FEATS, num_samples=NUM_SAMPLES):
+def get_training_samples(joint_id, X, y, theta, num_feats=NUM_FEATS, num_samples=NUM_SAMPLES):
     """Generates training samples for each joint.
 
     Each sample is (i, q, u, f) where:
@@ -264,7 +286,7 @@ def get_training_samples(joint_id, X, y, body_centers, theta, num_feats=NUM_FEAT
 
     @params:
         X : depth images (N x H x W)
-        y : joint positions (im_x, im_y, depth_z)
+        y : joint position = (N x NUM_JOINTS x 3) = (im_x, im_y, depth_z)
         joint_id : current joint id
         num_samples : number of samples of each joint
         max_offset_xy : maximum offset for samples in (x, y) axes
@@ -288,9 +310,9 @@ def get_training_samples(joint_id, X, y, body_centers, theta, num_feats=NUM_FEAT
             depth_im = X[train_idx]
             offset = get_random_offset()
             unit_offset = 0 if np.linalg.norm(offset) == 0 else (-offset / np.linalg.norm(offset))
-            body_center_z = body_centers[train_idx][2]
+            body_center_z = y[train_idx][JOINT_IDX['TORSO']][2] # body center (torso) index, 2 = z_index
 
-            S_f[train_idx, sample_idx] = get_features(depth_im, y[train_idx] + offset, body_center_z, theta)
+            S_f[train_idx, sample_idx] = get_features(depth_im, y[train_idx][joint_id] + offset, body_center_z, theta)
             S_u[train_idx, sample_idx] = unit_offset
 
     return S_f, S_u
@@ -372,34 +394,37 @@ def train(joint_id, X, y, model_dir, min_samples_leaf=400, load_models=args.load
 
     return regressor, L
 
-def train_parallel(joint_id, X, y, body_centers, theta, model_dir, regressor_queue, L_queue):
+def train_parallel(joint_id, X, y, theta, model_dir, regressor_queue, L_queue):
     """Train each join in parallel.
     """
-    S_f, S_u = get_training_samples(joint_id, X, y, body_centers, theta)
+    S_f, S_u = get_training_samples(joint_id, X, y, theta)
     regressor, L = train(joint_id, S_f, S_u, model_dir)
     regressor_queue.put({joint_id: regressor})
     L_queue.put({joint_id: L})
 
-def train_series(joint_id, X, y, body_centers, theta, model_dir):
+def train_series(joint_id, X, y, theta, model_dir):
     """Train each joint sequentially.
     """
-    S_f, S_u = get_training_samples(joint_id, X, y, body_centers, theta)
+    S_f, S_u = get_training_samples(joint_id, X, y, theta)
     regressor, L = train(joint_id, S_f, S_u, model_dir)
     return regressor, L
 
 logger.debug('\n------- Training models -------')
 
+theta = compute_theta()
+
 regressors, Ls = {}, {}
+
 if not args.multithread:
     for joint_id in range(NUM_JOINTS):
-        regressors[joint_id], Ls[joint_id] = train_series(joint_id, X_train, y_train[:, joint_id], body_centers_train, theta, args.model_dir)
+        regressors[joint_id], Ls[joint_id] = train_series(joint_id, X_train, y_train, theta, args.model_dir)
 else:
     processes = []
     regressor_queue, L_queue = Queue(), Queue()
 
     for joint_id in range(NUM_JOINTS):
         p = Process(target=train_parallel, name='Thread #%d' % joint_id, args= \
-                    (joint_id, X_train, y_train[:, joint_id], body_centers_train, theta, args.model_dir, regressor_queue, L_queue))
+                    (joint_id, X_train, y_train, theta, args.model_dir, regressor_queue, L_queue))
         processes.append(p)
         p.start()
 
@@ -416,6 +441,8 @@ else:
 ###############################################################################
 
 def test_model(regressor, L, theta, qm0, img, body_center, num_steps=args.num_steps, step_size=args.step_size):
+    """Test the model on a single example.
+    """
     qm = np.zeros((num_steps + 1, 3))
     qm[0] = qm0
     joint_pred = np.zeros(3)
@@ -450,10 +477,11 @@ local_error = np.zeros((num_test, args.num_steps+1, NUM_JOINTS, 3))
 # else:
 for kinem_idx, joint_id in enumerate(kinem_order):
     logger.debug('Testing %s model', JOINT_NAMES[joint_id])
+    parent_joint_id = kinem_parent[kinem_idx]
     for test_idx in range(num_test):
-        qm0 = body_centers_test[test_idx] if kinem_parent[kinem_idx] == -1 else y_pred[test_idx][kinem_parent[kinem_idx]]
-        qms[test_idx][joint_id], y_pred[test_idx][joint_id] = test_model(regressors[joint_id], Ls[joint_id], theta, qm0, X_test[test_idx], body_centers_test[test_idx])
-        local_error[test_idx, :, joint_id, :] = y_test[test_idx, joint_id] - qms[test_idx][joint_id]
+        qm0 = y_test[test_idx][JOINT_IDX['TORSO']] if parent_joint_id == -1 else y_pred[test_idx][parent_joint_id]
+        qms[test_idx][joint_id], y_pred[test_idx][joint_id] = test_model(regressors[joint_id], Ls[joint_id], theta, qm0, X_test[test_idx], y_test[test_idx][JOINT_IDX['TORSO']])
+        local_error[test_idx, :, joint_id, :] = y_test[test_idx][joint_id] - qms[test_idx][joint_id]
 
 y_pred[:, :, 2] = y_test[:, :, 2]
 
@@ -518,4 +546,4 @@ logger.debug('\n------- Saving prediction visualizations -------')
 
 for test_idx in range(num_test):
     png_path = os.path.join(args.png_dir, str(test_idx) + '.png')
-    drawPred(X_test[test_idx], y_pred[test_idx], qms[test_idx], body_centers_test[test_idx], png_path, NUM_JOINTS, JOINT_NAMES)
+    drawPred(X_test[test_idx], y_pred[test_idx], qms[test_idx], y_test[test_idx][JOINT_IDX['TORSO']], png_path, NUM_JOINTS, JOINT_NAMES)
