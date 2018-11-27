@@ -42,8 +42,8 @@ depth-pose-estimation/
 parser = argparse.ArgumentParser(description='Random Tree Walks algorithm.')
 
 # Loading options for the model and data
-parser.add_argument('--load-params', action='store_true',
-                    help='Load the parameters')
+# parser.add_argument('--load-params', action='store_true',
+#                     help='Load the parameters')
 parser.add_argument('--load-model', action='store_true',
                     help='Load a pretrained model')
 parser.add_argument('--load-test', action='store_true',
@@ -71,11 +71,11 @@ parser.add_argument('--shuffle', type=int, default=1,
 parser.add_argument('--multithread', action='store_true',
                     help='Train each joint on a separate threads')
 
-# Evaluation parameters
+# Evaluation hyperparameters
 parser.add_argument('--num-steps', type=int, default=300,
                     help='Number of steps during evaluation')
-parser.add_argument('--step-size', type=int, default=3,
-                    help='Step size during evaluation')
+parser.add_argument('--step-size', type=int, default=2,
+                    help='Step size (in cm) during evaluation')
 
 # Output options
 parser.add_argument('--make-png', action='store_true',
@@ -98,8 +98,8 @@ MAX_FEAT_OFFSET = 150
 NUM_SAMPLES = 500
 
 # Set maximum XYZ offset from each joint
-MAX_XY_OFFSET = 60 # image xy coordinates
-MAX_Z_OFFSET = 2 # z depth coordinates
+MAX_XY_OFFSET = 10 # image xy coordinates (pixels)
+MAX_Z_OFFSET = 0.5 # z-depth coordinates (meters)
 
 # Number of clusters for K-Means regression
 K = 20
@@ -112,14 +112,14 @@ K = 20
 NUM_JOINTS = 15
 
 # List of joint names
-JOINT_NAMES = ['NECK', 'HEAD', \
-                'LEFT SHOULDER', 'LEFT ELBOW', 'LEFT HAND', \
-                'RIGHT SHOULDER', 'RIGHT ELBOW', 'RIGHT HAND', \
-                'LEFT KNEE', 'LEFT FOOT', \
-                'RIGHT KNEE', 'RIGHT FOOT', \
-                'LEFT HIP', \
-                'RIGHT HIP', \
-                'TORSO']
+JOINT_NAMES = ['NECK (0)', 'HEAD (1)', \
+                'LEFT SHOULDER (2)', 'LEFT ELBOW (3)', 'LEFT HAND (4)', \
+                'RIGHT SHOULDER (5)', 'RIGHT ELBOW (6)', 'RIGHT HAND (7)', \
+                'LEFT KNEE (8)', 'LEFT FOOT (9)', \
+                'RIGHT KNEE (10)', 'RIGHT FOOT (11)', \
+                'LEFT HIP (12)', \
+                'RIGHT HIP (13)', \
+                'TORSO (14)']
 
 # Depth image dimension
 H, W = 240, 320
@@ -127,8 +127,9 @@ H, W = 240, 320
 # See https://help.autodesk.com/view/MOBPRO/2018/ENU/?guid=__cpp_ref__nui_image_camera_8h_source_html
 C = 3.8605e-3 # NUI_CAMERA_DEPTH_NOMINAL_INVERSE_FOCAL_LENGTH_IN_PIXELS
 
-kinem_order = [0, 1, 2, 5, 3, 6, 4, 7, 8, 10, 9, 11]
-kinem_parent = [-1, 0, 0, 0, 2, 5, 3, 6, -1, -1, 8, 10]
+# Set the kinematic tree (starting from torso body center)
+kinem_order =  [14,  0, 13, 12, 1, 2, 5, 3, 6, 4, 7,  8, 10, 9, 11]
+kinem_parent = [-1, 14, 14, 14, 0, 0, 0, 2, 5, 3, 6, 12, 13, 8, 10]
 
 ###############################################################################
 # Load dataset splits
@@ -160,7 +161,7 @@ def load_dataset(processed_dir, is_mask=False):
         depth_images = depth_images * depth_mask
 
     logger.debug('Data loaded: # data: %d', depth_images.shape[0])
-    return depth_images[:4000], joints[:4000]
+    return depth_images[:2000], joints[:2000]
 
 def compute_params(joints, num_feats=NUM_FEATS, max_feat_offset=MAX_FEAT_OFFSET):
     """Computes the body centers for each skeleton.
@@ -317,7 +318,7 @@ def stochastic(regressor, features, unit_directions):
         L[leaf_id] = (weights, centers)
     return L
 
-def train(joint_id, X, y, model_dir, min_samples_leaf=400, load_models=False):
+def train(joint_id, X, y, model_dir, min_samples_leaf=400, load_models=args.load_model):
     """Trains a regressor tree on the unit directions towards the joint.
 
     @params:
@@ -505,15 +506,16 @@ for i in range(NUM_JOINTS):
     logger.debug('10cm accuracy: %f', np.sum(distances[:, i] < 10) / float(distances.shape[0]))
     logger.debug('15cm accuracy: %f', np.sum(distances[:, i] < 15) / float(distances.shape[0]))
     mAP += np.sum(distances[:, i] < 10) / float(distances.shape[0])
+
 logger.debug('mAP (10cm): %f', mAP / NUM_JOINTS)
 
 ###############################################################################
 # Visualize predictions
 ###############################################################################
 
-if args.make_png:
-    logger.debug('\n------- Saving prediction visualizations -------')
+# if args.make_png:
+logger.debug('\n------- Saving prediction visualizations -------')
 
-    for test_idx in range(num_test):
-        png_path = os.path.join(args.png_dir, str(test_idx) + '.png')
-        drawPred(X_test[test_idx], y_pred[test_idx], qms[test_idx], body_centers_test[test_idx], png_path, NUM_JOINTS, JOINT_NAMES)
+for test_idx in range(num_test):
+    png_path = os.path.join(args.png_dir, str(test_idx) + '.png')
+    drawPred(X_test[test_idx], y_pred[test_idx], qms[test_idx], body_centers_test[test_idx], png_path, NUM_JOINTS, JOINT_NAMES)

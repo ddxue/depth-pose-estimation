@@ -166,7 +166,7 @@ def drawPred(img, joints, paths, center, filename, nJoints, jointName):
     '''
     img = (img-np.amin(img))*255.0/(np.amax(img)-np.amin(img))
     img = img.astype(np.uint8)
-    #img = cv2.equalizeHist(img)
+    img = cv2.equalizeHist(img)
     img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
     img = cv2.applyColorMap(img, cv2.COLORMAP_OCEAN)
     img = np.hstack((img, np.zeros((H, 100, 3)))).astype(np.uint8)
@@ -185,8 +185,8 @@ def drawPred(img, joints, paths, center, filename, nJoints, jointName):
             cv2.circle(img, tuple(joint[:2].astype(np.uint16)), 4, palette[i], -1)
 
         for i, joint in enumerate(joints):
-            cv2.rectangle(img, (W, H*i/nJoints), (W+100, H*(i+1)/nJoints-1), palette[i], -1)
-            cv2.putText(img, jointName[i], (W, H*(i+1)/nJoints-5), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255, 255, 255))
+            cv2.rectangle(img, (W, int(H*i/nJoints)), (W+100, int(H*(i+1)/nJoints-1)), palette[i], -1)
+            cv2.putText(img, jointName[i], (W, int(H*(i+1)/nJoints-5)), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255, 255, 255))
 
     cv2.rectangle(img, tuple([int(center[0]-2), int(center[1]-2)]),
                   tuple([int(center[0]+2), int(center[1]+2)]),
