@@ -1,5 +1,8 @@
 # Human Pose Estimation from Depth Images
-Human pose estimation from a single depth image.
+Human pose estimation from a single depth image. 
+
+## Status
+Currently implements random tree walks (RTW) on the CAD-60 dataset.
 
 # Quick-Start
 (1) Process the CAD-60 dataset from data/datasets/ into numpy arrays in data/processed/.
