@@ -92,14 +92,14 @@ args = parser.parse_args()
 
 # Train-test ratio
 TRAIN_RATIO = 0.7
-SMALL_DATA_SIZE = 40000
+SMALL_DATA_SIZE = 20000
 
 # Dimension of each feature vector
 NUM_FEATS = 500
 MAX_FEAT_OFFSET = 150
 
 # Number of samples for each joint for each example
-NUM_SAMPLES = 200
+NUM_SAMPLES = 300
 
 # Set maximum XYZ offset from each joint
 MAX_XY_OFFSET = 10 # image xy coordinates (pixels)
