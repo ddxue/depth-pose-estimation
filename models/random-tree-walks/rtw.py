@@ -18,11 +18,15 @@ depth-pose-estimation/
     data/
         datasets/
             CAD-60/
+            NTU-RGBD/
             ...
         processed/
             CAD-60/
                 depth_images.npy
                 joints.npy
+            NTU-RGBD/
+                depth_images.npy
+                joints.npy                
             ...
     models/
         random-tree-walks/
@@ -31,9 +35,14 @@ depth-pose-estimation/
         ...
     output/
         random-tree-walks/
-            models/
-            preds/
-            png/
+            CAD-60/
+                models/
+                preds/
+                png/
+            NTU-RGBD/
+                models/
+                preds/
+                png/
 """
 
 ###############################################################################
@@ -53,16 +62,16 @@ parser.add_argument('--load-test', action='store_true',
 # Location of data directories
 parser.add_argument('--input-dir', type=str, default='../../data/processed',
                     help='Directory of the processed input')
-parser.add_argument('--dataset', type=str, default='CAD-60',
+parser.add_argument('--dataset', type=str, default='NTU-RGBD', # NTU-RGBD, CAD-60
                     help='Name of the dataset to load')
 
-# Location of saved data directories
-parser.add_argument('--model-dir', type=str, default='../../output/random-tree-walks/models',
-                    help='Directory of the saved model')
-parser.add_argument('--preds-dir', type=str, default='../../output/random-tree-walks/preds',
-                    help='Directory to save predictions')
-parser.add_argument('--png-dir', type=str, default='../../output/random-tree-walks/png',
-                    help='Directory to save prediction images')
+# Location of output saved data directories
+# parser.add_argument('--model-dir', type=str, default='../../output/random-tree-walks/models',
+#                     help='Directory of the saved model')
+# parser.add_argument('--preds-dir', type=str, default='../../output/random-tree-walks/preds',
+#                     help='Directory to save predictions')
+# parser.add_argument('--png-dir', type=str, default='../../output/random-tree-walks/png',
+#                     help='Directory to save prediction images')
 
 # Training options
 parser.add_argument('--seed', type=int, default=1111,
@@ -86,13 +95,18 @@ parser.add_argument('--make-png', action='store_true',
 
 args = parser.parse_args()
 
+# Set location of output saved files
+args.model_dir = '../../output/random-tree-walks/' + args.dataset + '/models'
+args.preds_dir = '../../output/random-tree-walks/' + args.dataset + '/preds'
+args.png_dir = '../../output/random-tree-walks/' + args.dataset + '/png'
+
 ###############################################################################
 # Training hyperparameters
 ###############################################################################
 
 # Train-test ratio
-TRAIN_RATIO = 0.7
-SMALL_DATA_SIZE = 20000
+TRAIN_RATIO = 0.8
+SMALL_DATA_SIZE = 5000
 
 # Dimension of each feature vector
 NUM_FEATS = 500
@@ -109,7 +123,18 @@ MAX_Z_OFFSET = 0.5 # z-depth coordinates (meters)
 K = 20
 
 ###############################################################################
-# Constants
+# Dataset Constants
+###############################################################################
+
+# Depth image dimension
+# H, W = 240, 320
+H, W = 424, 512
+
+# See https://help.autodesk.com/view/MOBPRO/2018/ENU/?guid=__cpp_ref__nui_image_camera_8h_source_html
+C = 3.8605e-3 # NUI_CAMERA_DEPTH_NOMINAL_INVERSE_FOCAL_LENGTH_IN_PIXELS
+
+###############################################################################
+# RTW Constants
 ###############################################################################
 
 # Number of joints in a skeleton
@@ -144,12 +169,6 @@ JOINT_IDX = {
     'TORSO': 14,
 }
 
-# Depth image dimension
-H, W = 240, 320
-
-# See https://help.autodesk.com/view/MOBPRO/2018/ENU/?guid=__cpp_ref__nui_image_camera_8h_source_html
-C = 3.8605e-3 # NUI_CAMERA_DEPTH_NOMINAL_INVERSE_FOCAL_LENGTH_IN_PIXELS
-
 # Set the kinematic tree (starting from torso body center)
 kinem_order =  [14,  0, 13, 12, 1, 2, 5, 3, 6, 4, 7,  8, 10, 9, 11]
 kinem_parent = [-1, 14, 14, 14, 0, 0, 0, 2, 5, 3, 6, 12, 13, 8, 10]
@@ -158,7 +177,7 @@ kinem_parent = [-1, 14, 14, 14, 0, 0, 0, 2, 5, 3, 6, 12, 13, 8, 10]
 # Load dataset splits
 ###############################################################################
 
-def load_dataset(processed_dir, is_mask=False, small_data=True):
+def load_dataset(processed_dir, is_mask=False, small_data=False):
     """Loads the depth images and joints from the processed dataset.
 
     Note that each joint is a coordinate of the form (im_x, im_y, depth_z).

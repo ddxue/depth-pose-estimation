@@ -22,8 +22,10 @@ ch.setLevel(logging.DEBUG)
 ch.setFormatter(formatter)
 logger.addHandler(ch)
 
-H = 240
-W = 320
+# H = 240
+# W = 320
+H, W = 424, 512
+
 
 palette = [(34, 88, 226), (34, 69, 101), (0, 195, 243), (146, 86, 135), \
            (38, 61, 43), (241, 202, 161), (50, 0, 190), (128, 178, 194), \
@@ -142,7 +144,7 @@ def visualizeImgs(I, joints):
     cv2.destroyAllWindows()
 
 def drawPts(img, pts):
-    img = cv2.equalizeHist(img.astype(np.uint8))
+#     img = cv2.equalizeHist(img.astype(np.uint8))
     img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
     if pts.ndim == 1:
         cv2.circle(img, tuple(pts[:2].astype(np.uint16)), 4, (255,0,0), -1)
