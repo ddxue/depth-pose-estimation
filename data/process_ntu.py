@@ -15,6 +15,49 @@ def world2pixel(world, C):
 	pixel[:, 2] = world[:, 2]
 	return pixel
 
+# Map from joint names to index
+JOINT_IDX = {
+    'NECK': 0,
+    'HEAD': 1,
+    'LEFT SHOULDER': 2,
+    'LEFT ELBOW': 3,
+    'LEFT HAND': 4,
+    'RIGHT SHOULDER': 5,
+    'RIGHT ELBOW': 6,
+    'RIGHT HAND': 7,
+    'LEFT KNEE': 8,
+    'LEFT FOOT': 9,
+    'RIGHT KNEE': 10,
+    'RIGHT FOOT': 11,
+    'LEFT HIP': 12,
+    'RIGHT HIP': 13,
+    'TORSO': 14,
+}
+
+def rearrange_joints(joints):
+	"""Takes in 25 xyz joints and returns 15 xyz joints"""
+	new_joints = []
+
+	for i, joint in enumerate(joints):
+		new_joints = [
+			joints[20], # neck
+			joints[3], # head
+			joints[4], # left shoulder
+			joints[5], # left elbow
+			joints[7], # left hand
+			joints[8], # right shoulder
+			joints[9], # right elbow
+			joints[11], # right hand
+			joints[13], # left knee
+			joints[14], # left foot
+			joints[17], # right knee
+			joints[18], # right foot
+			joints[12], # left hip
+			joints[16], # right hip
+			joints[0], # torso
+		]
+
+	return new_joints
 
 # aggregate files to go through
 names = []
@@ -56,6 +99,8 @@ for name in sorted(names): # example name: 'S001C001P001R001A001'
 				xyz = [float(x) for x in joint_info[:3]]
 				curr_joints.append(xyz)
 			if i == denom + prev - 1: # end of frame
+				curr_joints = rearrange_joints(curr_joints)
+
 				curr_joints_transformed = world2pixel(np.array(curr_joints), C)
 				curr_joints_transformed[:,2] = curr_joints_transformed[:,2] / 1000.0 # convert from mm to meters -- do we still need to do this?
 				joints.append(curr_joints_transformed)
