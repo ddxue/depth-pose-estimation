@@ -96,14 +96,18 @@ for name in sorted(names): # example name: 'S001C001P001R001A001'
 				joint_info = line.strip().split(" ") # should always be 12 long
 				if len(joint_info) != 12:
 					assert False, 'len joint_info = {}'.format(len(joint_info))
-				xyz = [float(x) for x in joint_info[:3]]
+				im_x = float(joint_info[3])
+				im_y = float(joint_info[4])
+				depth_z = float(joint_info[2])
+				xyz = [im_x, im_y, depth_z]
 				curr_joints.append(xyz)
 			if i == denom + prev - 1: # end of frame
 				curr_joints = rearrange_joints(curr_joints)
 
-				curr_joints_transformed = world2pixel(np.array(curr_joints), C)
-				curr_joints_transformed[:,2] = curr_joints_transformed[:,2] / 1000.0 # convert from mm to meters -- do we still need to do this?
-				joints.append(curr_joints_transformed)
+				# curr_joints_transformed = world2pixel(np.array(curr_joints), C)
+				# curr_joints_transformed[:,2] = curr_joints_transformed[:,2] / 1000.0 # convert from mm to meters -- do we still need to do this?
+
+				joints.append(curr_joints)
 				curr_joints = []
 				prev+=denom
 
